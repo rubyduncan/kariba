@@ -31,6 +31,7 @@ Cyclosyn::~Cyclosyn() { gsl_spline_free(syn_f), gsl_interp_accel_free(syn_acc); 
 Cyclosyn::Cyclosyn(size_t size) : Radiation(size) {
     en_phot_obs.resize(en_phot_obs.size() * 2, 0.0);
     num_phot_obs.resize(num_phot_obs.size() * 2, 0.0);
+    cyclosyn_absorption_rate.resize(size, 0.0);
 
     counterjet = false;
 
@@ -40,8 +41,48 @@ Cyclosyn::Cyclosyn(size_t size) : Radiation(size) {
     gsl_spline_init(syn_f, arg, var, 47);
 }
 
+double cyclosyn_kernel(double gamma, double nu, double b, gsl_spline* syn, gsl_interp_accel* acc_syn) {
+    double nu_c, x, emisfunc, nu_larmor, psquared;
+    // this is in the synchrotron regime
+    // use the approximation for the pitch angle averaged version from 
+    // Aharonian, Kelner & Prosekin 2010, D7
+    if (gamma > 2.) {
+        nu_c = (3. * constants::charg * b * std::pow(gamma, 2.)) /
+               (4. * constants::pi * constants::emgm * constants::cee);
+        x = nu / nu_c;
+        // This is F(x) , which is not pitch angle averaged
+        // if (x <= 1.e-4) {
+        //     emisfunc = 4. * constants::pi * std::cbrt(x / 2.) / (sqrt(3.) * 2.68);
+        // } else if (x > 50.) {
+        //     emisfunc = sqrt(constants::pi * x / 2.) * std::exp(-x);
+        // } else {
+        //     emisfunc = std::pow(10., gsl_spline_eval(syn, x, acc_syn));
+        // }
+        if (x <= 700) {
+            double x13 = std::cbrt(x);   // more stable than pow(x, 1./3.)
+            double x23 = x13 * x13;
+            double x43 = x23 * x23;
+            double t1 = 1.808 * x13 / std::sqrt(1 + 3.4 * x23);
+            double t2 = 1 + 2.21 * x23  + 0.347 * x43;
+            double t3 = 1 + 1.353 * x23  + 0.217 * x43;
+            emisfunc = t1 * t2 / t3 * std::exp(-x);
+        }
+        else {
+            emisfunc = 1e-305; // floor, = 0
+        }
+    } else {    // cyclotron regime
+        nu_larmor =
+            (constants::charg * b) / (2. * constants::pi * constants::emgm * constants::cee);
+        x = nu / nu_larmor;
+        psquared = std::pow(gamma, 2.) - 1.;
+        emisfunc = (2. * psquared) / (1. + 3. * psquared) *
+                   std::exp((2. * (1. - x)) / (1. + 3. * psquared));
+    }
+    return emisfunc;
+}
+
 //! Single particle emissivity/absorption coefficient calculations
-double cyclosyn_emis(double gamma, void* pars) {
+double cyclosyn_emis(double log_rho, void* pars) {
     CyclosynEmisParams* params = static_cast<CyclosynEmisParams*>(pars);
     double nu = params->nu;
     double b = params->b;
@@ -50,35 +91,16 @@ double cyclosyn_emis(double gamma, void* pars) {
     gsl_spline* eldis = params->eldis;
     gsl_interp_accel* acc_eldis = params->acc_eldis;
 
-    double nu_c, x, emisfunc, nu_larmor, psquared, ngamma;
-    gamma = std::exp(gamma);
-    // this is in the synchrotron regime
-    if (gamma > 2.) {
-        nu_c = (3. * constants::charg * b * std::pow(gamma, 2.)) /
-               (4. * constants::pi * constants::emgm * constants::cee);
-        x = nu / nu_c;
-        if (x <= 1.e-4) {
-            emisfunc = 4. * constants::pi * std::pow(x / 2., (1. / 3.)) / (sqrt(3.) * 2.68);
-        } else if (x > 50.) {
-            emisfunc = sqrt(constants::pi * x / 2.) * std::exp(-x);
-        } else {
-            emisfunc = std::pow(10., gsl_spline_eval(syn, x, acc_syn));
-        }
-    } else {    // cyclotron regime
-        nu_larmor =
-            (constants::charg * b) / (2. * constants::pi * constants::emgm * constants::cee);
-        x = nu / nu_larmor;
-        psquared = std::pow(gamma, 2.) - 1.;
-        emisfunc = (2. * psquared) / (1. + 3. * psquared) *
-                   std::exp((2. * (1. - x)) / (1. + 3. * psquared));
-    }
-
+    double gamma, emisfunc, ngamma, nlogp, norm_em;
+    gamma = std::sqrt(std::exp(2*log_rho) + 1);
+    emisfunc = cyclosyn_kernel(gamma, nu, b, syn, acc_syn);
     ngamma = gsl_spline_eval(eldis, gamma, acc_eldis);
-
-    return ngamma * gamma * emisfunc;
+    nlogp = (gamma*gamma - 1)/gamma * ngamma; // dn/dlogp = p dn/dp = p dgamma/dp dn/dgamma
+    norm_em = sqrt(3.) * std::pow(constants::charg, 3) * b / constants::emerg;
+    return nlogp * emisfunc * norm_em;
 }
 
-double cyclosyn_abs(double gamma, void* pars) {
+double cyclosyn_abs(double log_rho, void* pars) {
     CyclosynAbsParams* params = static_cast<CyclosynAbsParams*>(pars);
     double nu = (params->nu);
     double b = (params->b);
@@ -87,31 +109,16 @@ double cyclosyn_abs(double gamma, void* pars) {
     gsl_spline* derivs = (params->derivs);
     gsl_interp_accel* acc_derivs = (params->acc_derivs);
 
-    double nu_c, x, emisfunc, nu_larmor, psquared, ngamma_diff;
-    gamma = std::exp(gamma);
-    // this is in the synchrotron regime
-    if (gamma > 2.) {
-        nu_c = (3. * constants::charg * b * std::pow(gamma, 2.)) /
-               (4. * constants::pi * constants::emgm * constants::cee);
-        x = nu / nu_c;
-        if (x <= 1.e-4) {
-            emisfunc = 4. * constants::pi * std::pow(x / 2., (1. / 3.)) / (sqrt(3.) * 2.68);
-        } else if (x > 50.) {
-            emisfunc = sqrt(constants::pi * x / 2.) * std::exp(-x);
-        } else {
-            emisfunc = std::pow(10., gsl_spline_eval(syn, x, acc_syn));
-        }
-    } else {    // cyclotron regime
-        nu_larmor =
-            (constants::charg * b) / (2. * constants::pi * constants::emgm * constants::cee);
-        x = nu / nu_larmor;
-        psquared = std::pow(gamma, 2.) - 1.;
-        emisfunc = (2. * psquared) / (1. + 3. * psquared) *
-                   std::exp((2. * (1. - x)) / (1. + 3. * psquared));
-    }
-    ngamma_diff = gsl_spline_eval(derivs, gamma, acc_derivs);
-
-    return ngamma_diff * std::pow(gamma, 2.) * emisfunc;
+    // using eg. Ghisellini & Svensson 1991, eq 1
+    double gamma, rho, emisfunc, pdensp2_diff_logp, nlogp, norm_em, norm_ab, fac_p;
+    gamma = std::sqrt(std::exp(2*log_rho) + 1);
+    rho = std::exp(log_rho);
+    emisfunc = cyclosyn_kernel(gamma, nu, b, syn, acc_syn);
+    pdensp2_diff_logp = gsl_spline_eval(derivs, gamma, acc_derivs);
+    norm_em = sqrt(3.) * std::pow(constants::charg, 3) * b / constants::emerg;
+    norm_ab = - std::pow(nu, -2.) / (8. * constants::pi * constants::emgm);
+    fac_p = std::pow(constants::emgm * constants::cee, 3); // from p to rho
+    return norm_ab * gamma * rho * norm_em * emisfunc * pdensp2_diff_logp * fac_p;
 }
 
 //! Integrals of single particle emissivity/absorption coefficient over particle
@@ -125,7 +132,9 @@ double Cyclosyn::emis_integral(double nu, double gmin, double gmax, gsl_spline* 
     auto F1params = CyclosynEmisParams{nu, bfield, syn_f, syn_acc, eldis, acc_eldis};
     F1.function = &cyclosyn_emis;
     F1.params = &F1params;
-    gsl_integration_qag(&F1, std::log(gmin), std::log(gmax), 1e1, 1e1, 100, 2, w1, &result1,
+    double rho_min = std::sqrt(gmin*gmin - 1);
+    double rho_max = std::sqrt(gmax*gmax - 1);
+    gsl_integration_qag(&F1, std::log(rho_min), std::log(rho_max), 1e1, 1e1, 100, 2, w1, &result1,
                         &error1);
     gsl_integration_workspace_free(w1);
 
@@ -141,7 +150,9 @@ double Cyclosyn::abs_integral(double nu, double gmin, double gmax, gsl_spline* d
     auto F1params = CyclosynAbsParams{nu, bfield, syn_f, syn_acc, derivs, acc_derivs};
     F1.function = &cyclosyn_abs;
     F1.params = &F1params;
-    gsl_integration_qag(&F1, std::log(gmin), std::log(gmax), 1e1, 1e1, 100, 2, w1, &result1,
+    double rho_min = std::sqrt(gmin*gmin - 1);
+    double rho_max = std::sqrt(gmax*gmax - 1);
+    gsl_integration_qag(&F1, std::log(rho_min), std::log(rho_max), 1e1, 1e1, 100, 2, w1, &result1,
                         &error1);
     gsl_integration_workspace_free(w1);
 
@@ -152,10 +163,10 @@ double Cyclosyn::abs_integral(double nu, double gmin, double gmax, gsl_spline* d
 void Cyclosyn::cycsyn_spectrum(double gmin, double gmax, gsl_spline* eldis,
                                gsl_interp_accel* acc_eldis, gsl_spline* eldis_diff,
                                gsl_interp_accel* acc_eldis_diff) {
-    double emis, abs;
-    double pitch = 0.73;
-    double acons, elcons, asyn, epsasyn;
-    double absfac, tsyn, tsyn_obs, absfac_obs;
+    double j_emis, alpha_abs;
+    // double pitch = 0.73;
+    // double acons, elcons, asyn, epsasyn;
+    double absfac, tau_syn, tau_syn_obs, absfac_obs;
     double dopfac_cj;
 
     dopfac_cj = dopfac * (1. - beta * cos(angle)) / (1. + beta * cos(angle));
@@ -166,59 +177,59 @@ void Cyclosyn::cycsyn_spectrum(double gmin, double gmax, gsl_spline* eldis,
         if (counterjet == true) {
             en_phot_obs[k + size] = en_phot[k] * dopfac_cj;
         }
-        emis = emis_integral(en_phot[k] / constants::herg, gmin, gmax, eldis, acc_eldis);
-        abs = abs_integral(en_phot[k] / constants::herg, gmin, gmax, eldis_diff, acc_eldis_diff);
-        if (std::log10(emis) < -50. || std::log10(abs) < -50.) {
+        j_emis = emis_integral(en_phot[k] / constants::herg, gmin, gmax, eldis, acc_eldis);
+        alpha_abs = abs_integral(en_phot[k] / constants::herg, gmin, gmax, eldis_diff, acc_eldis_diff);
+        if (std::log10(j_emis) < -150. || std::log10(alpha_abs) < -150.) {
             num_phot_obs[k] = 0;
             if (counterjet == true) {
                 num_phot_obs[k + size] = 0;
             }
         } else {
-            elcons = sqrt(3.) * (constants::charg * constants::charg * constants::charg) * bfield *
-                     sin(pitch) / constants::emerg;
-            acons = -constants::cee * constants::cee /
-                    (8. * constants::pi * std::pow(en_phot[k] / constants::herg, 2.));
-            asyn = acons * elcons * abs;
-            epsasyn = emis / (acons * abs);
-            if (geometry == "cylinder") {
-                tsyn = constants::pi / 2. * asyn * r;
-            } else {
-                tsyn = constants::pi / 3. * asyn * r;
-            }
-            if (tsyn >= 1.) {
-                absfac = (1. - std::exp(-tsyn));
-            } else {
-                absfac = tsyn - std::pow(tsyn, 2.) / 2. + std::pow(tsyn, 3.) / 6.;
-            }
-            // This includes skin depth/viewing angle effects for cylinder case
-            if (geometry == "cylinder") {
-                tsyn_obs = constants::pi / 2. * asyn * r / (dopfac * sin(angle));
-            } else {
-                tsyn_obs = constants::pi / 3. * asyn * r;
-            }
-            if (tsyn_obs >= 1.) {
-                absfac_obs = (1. - std::exp(-tsyn_obs));
-            } else {
-                absfac_obs = tsyn_obs - std::pow(tsyn_obs, 2.) / 2. + std::pow(tsyn_obs, 3.) / 6.;
-            }
+            // elcons = sqrt(3.) * (constants::charg * constants::charg * constants::charg) * bfield *
+            //          sin(pitch) / constants::emerg;
+            // acons = -constants::cee * constants::cee /
+            //         (8. * constants::pi * std::pow(en_phot[k] / constants::herg, 2.));
+            // asyn = acons * elcons * abs;
+            // cyclosyn_absorption_rate[k] = asyn * constants::cee * constants::pi;
+            
+            // epsasyn = emis / (acons * abs);
+            
+            // // This includes skin depth/viewing angle effects for cylinder case
 
-            num_phot[k] = constants::pi * r * r * absfac * epsasyn;
-            num_phot_obs[k] = 2. * r * z * absfac_obs * epsasyn * std::pow(dopfac, dopnum);
+            // if (geometry == "cylinder") {
+            //     tsyn_obs = constants::pi / 2. * asyn * r / (dopfac * sin(angle));
+            // } else {
+            //     tsyn_obs = constants::pi / 3. * asyn * r;
+            // }
+
+            cyclosyn_absorption_rate[k] = alpha_abs * constants::cee;
+            double l_average = r;
+            // average path lengths
+            if (geometry == "cylinder") {
+                l_average *= constants::pi / 2.;
+            } else {
+                l_average *= constants::pi / 3.;
+            }
+            double t_esc = l_average / constants::cee; 
+            tau_syn = l_average * alpha_abs;
+            // numerically stable -( exp(-tsyn) - 1 )
+            absfac = - std::expm1(-tau_syn);
+            // observed opacities changed by doppler factor and viewing angle
+            tau_syn_obs = tau_syn / dopfac;
+            if (geometry == "cylinder") {
+                tau_syn_obs *= 1/sin(angle); // this is spooky for theta = 0 ? 
+            }
+            absfac_obs = - std::expm1(-tau_syn_obs) / alpha_abs;
+            double cross_section_circle = constants::pi * r * r;
+            num_phot[k] =  cross_section_circle * absfac * j_emis/alpha_abs;
+            double projected_area = 2. * r * z; // diameter * height -> lacks projection for headon?
+            num_phot_obs[k] = projected_area * absfac_obs * j_emis * std::pow(dopfac, dopnum);
+            // num_phot_obs[k] = projected_area * r* t_esc * j_emis * std::pow(dopfac, dopnum);
 
             if (counterjet == true) {
-                if (geometry == "cylinder") {
-                    tsyn_obs = constants::pi / 2. * asyn * r / (dopfac * sin(angle));
-                } else {
-                    tsyn_obs = constants::pi / 3. * asyn * r;
-                }
-                if (tsyn_obs >= 1.) {
-                    absfac_obs = (1. - std::exp(-tsyn_obs));
-                } else {
-                    absfac_obs =
-                        tsyn_obs - std::pow(tsyn_obs, 2.) / 2. + std::pow(tsyn_obs, 3.) / 6.;
-                }
-                num_phot_obs[k + size] =
-                    2. * r * z * absfac_obs * epsasyn * std::pow(dopfac_cj, dopnum);
+                tau_syn_obs *= dopfac/dopfac_cj;
+                absfac_obs = - std::expm1(-tau_syn_obs) / alpha_abs;
+                num_phot_obs[k + size] = projected_area * absfac_obs * j_emis * std::pow(dopfac_cj, dopnum);
             } else {
                 num_phot_obs[k + size] = 0.;
             }

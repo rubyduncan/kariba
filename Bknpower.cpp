@@ -4,40 +4,25 @@
 #include <gsl/gsl_integration.h>
 #include <gsl/gsl_math.h>
 
-#include "kariba/Kappa.hpp"
+#include "kariba/Bknpower.hpp"
 #include "kariba/Particles.hpp"
 #include "kariba/constants.hpp"
 
 namespace kariba {
 
-//! Class constructor to initialize object
-Kappa::Kappa(size_t size) : Particles(size) {
-
-    knorm = 1.;
+Bknpower::Bknpower(size_t size) : Particles(size) {
+    norm = 1.;
 
     mass_gr = constants::emgm;
     mass_kev = constants::emgm * constants::gr_to_kev;
 }
 
-//! Method to set the temperature, using ergs as input
-void Kappa::set_temp_kev(double T) {
-    theta = T * constants::kboltz_kev2erg / (mass_gr * constants::cee * constants::cee);
-
-    double emin = (1. / 100.) * T;    //!< minimum energy in kev, 1/100 lower than peak
-    double emax = 20. * T;            //!< maximum energy in kev, 20 higher than peak
-    double gmin, gmax;
-
-    gmin = emin / mass_kev + 1.;
-    gmax = emax / mass_kev + 1.;
-    pmin = std::pow(std::pow(gmin, 2.) - 1., 1. / 2.) * mass_gr * constants::cee;
-    pmax = std::pow(std::pow(gmax, 2.) - 1., 1. / 2.) * mass_gr * constants::cee;
-}
-
-void Kappa::set_kappa(double k) { kappa = k; }
-
-//! Methods to set momentum/energy arrays and number density arrays
-void Kappa::set_p(double ucom, double bfield, double betaeff, double r, double fsc) {
-    pmax = std::max(max_p(ucom, bfield, betaeff, r, fsc), pmax);
+//! Methods to set momentum/energy arrays
+void Bknpower::set_p(double min, double brk, double ucom, double bfield, double betaeff, double r,
+                     double fsc) {
+    pmin = min;
+    pbrk = brk;
+    pmax = max_p(ucom, bfield, betaeff, r, fsc);
 
     double pinc = (std::log10(pmax) - std::log10(pmin)) / static_cast<double>(p.size() - 1);
 
@@ -47,8 +32,9 @@ void Kappa::set_p(double ucom, double bfield, double betaeff, double r, double f
     }
 }
 
-//! Same as above, but assuming a fixed maximum Lorentz factor
-void Kappa::set_p(double gmax) {
+void Bknpower::set_p(double min, double brk, double gmax) {
+    pmin = min;
+    pbrk = brk;
     pmax = std::pow(std::pow(gmax, 2.) - 1., 1. / 2.) * mass_gr * constants::cee;
 
     double pinc = (std::log10(pmax) - std::log10(pmin)) / static_cast<double>(p.size() - 1);
@@ -59,60 +45,78 @@ void Kappa::set_p(double gmax) {
     }
 }
 
-void Kappa::set_ndens() {
-    for (size_t i = 0; i < gdens.size(); i++) {
-        gdens[i] = knorm * gamma[i] * std::pow(std::pow(gamma[i], 2.) - 1., 1. / 2.) *
-                   std::pow(1. + (gamma[i] - 1.) / (kappa * theta), -kappa - 1.);
+//! Method to set differential electron number density from known pspec,
+//! normalization, and momentum array
+void Bknpower::set_ndens() {
+    for (size_t i = 0; i < p.size(); i++) {
+        ndens[i] = norm * std::pow(p[i] / pbrk, -pspec1) /
+                   (1. + std::pow(p[i] / pbrk, -pspec1 + pspec2)) * std::exp(-p[i] / pmax);
     }
-    initialize_pdens();
-    gdens_differentiate();
+    initialize_gdens();
+    differentiate();
 }
+
+//! methods to set the slopes, break and normalization
+void Bknpower::set_pspec1(double s1) { pspec1 = s1; }
+
+void Bknpower::set_pspec2(double s2) { pspec2 = s2; }
+
+void Bknpower::set_brk(double brk) { pbrk = brk; }
 
 //! Methods to calculate the normalization of the function
-double norm_kappa_int(double x, void* pars) {
-    KParams* params = static_cast<KParams*>(pars);
-    double t = params->t;
-    double k = params->k;
+double norm_bkn_int(double x, void* pars) {
+    BknParams* params = static_cast<BknParams*>(pars);
 
-    return x * std::pow(std::pow(x, 2.) - 1., 1. / 2.) * std::pow(1. + (x - 1.) / (k * t), -k - 1.);
+    double s1 = params->s1;
+    double s2 = params->s2;
+    double brk = params->brk;
+    double max = params->max;
+    double m = params->m;
+
+    double mom_int = std::pow(std::pow(x, 2.) - 1., 1. / 2.) * m * constants::cee;
+
+    return std::pow(mom_int / brk, -s1) / (1. + std::pow(mom_int / brk, -s1 + s2)) *
+           std::exp(-mom_int / max);
 }
 
-void Kappa::set_norm(double n) {
+void Bknpower::set_norm(double n) {
     double norm_integral, error, min, max;
 
     min = std::pow(std::pow(pmin / (mass_gr * constants::cee), 2.) + 1., 1. / 2.);
     max = std::pow(std::pow(pmax / (mass_gr * constants::cee), 2.) + 1., 1. / 2.);
 
-    gsl_function F1;
-    auto params = KParams{theta, kappa};
     gsl_integration_workspace* w1;
     w1 = gsl_integration_workspace_alloc(100);
-    F1.function = &norm_kappa_int;
+    gsl_function F1;
+    auto params = BknParams{pspec1, pspec2, pbrk, pmax, mass_gr};
+    F1.function = &norm_bkn_int;
     F1.params = &params;
     gsl_integration_qag(&F1, min, max, 0, 1e-7, 100, 1, w1, &norm_integral, &error);
     gsl_integration_workspace_free(w1);
 
-    knorm = n / norm_integral;
+    norm = n / (norm_integral * mass_gr * constants::cee);
+}
+
+//! Injection function to be integrated in cooling
+double injection_bkn_int(double x, void* pars) {
+    InjectionBknParams* params = static_cast<InjectionBknParams*>(pars);
+    double s1 = params->s1;
+    double s2 = params->s2;
+    double brk = params->brk;
+    double max = params->max;
+    double m = params->m;
+    double n = params->n;
+
+    double mom_int = std::pow(std::pow(x, 2.) - 1., 1. / 2.) * m * constants::cee;
+
+    return n * std::pow(mom_int / brk, -s1) / (1. + std::pow(mom_int / brk, -s1 + s2)) *
+           std::exp(-mom_int / max);
 }
 
 //! Method to solve steady state continuity equation. NOTE: KN cross section not
 //! included in IC cooling
-double injection_kappa_int(double x, void* pars) {
-    InjectionKappaParams* params = static_cast<InjectionKappaParams*>(pars);
-    double t = params->t;
-    double k = params->k;
-    double n = params->n;
-    double m = params->m;
-
-    double mom = std::pow(std::pow(x, 2.) - 1., 1. / 2.) * m * constants::cee;
-    double diff = mom / (std::pow(m * constants::cee, 2.) *
-                         std::pow(std::pow(mom / (m * constants::cee), 2.) + 1., 1. / 2.));
-
-    return diff * n * x * std::pow(std::pow(x, 2.) - 1., 1. / 2.) *
-           std::pow(1. + (x - 1.) / (k * t), -k - 1.);
-}
-
-void Kappa::cooling_steadystate(double ucom, double n0, double bfield, double r, double betaeff) {
+void Bknpower::cooling_steadystate(double ucom, double n0, double bfield, double r,
+                                   double betaeff) {
     double Urad = std::pow(bfield, 2.) / (8. * constants::pi) + ucom;
     double pdot_ad = betaeff * constants::cee / r;
     double pdot_rad = (4. * constants::sigtom * constants::cee * Urad) /
@@ -121,12 +125,12 @@ void Kappa::cooling_steadystate(double ucom, double n0, double bfield, double r,
 
     double integral, error;
     gsl_function F1;
-    auto params = InjectionKappaParams{theta, kappa, knorm, mass_gr};
-    F1.function = &injection_kappa_int;
+    auto params = InjectionBknParams{pspec1, pspec2, pbrk, pmax, mass_gr, n0};
+    F1.function = &injection_bkn_int;
     F1.params = &params;
 
-    for (size_t i = 0; i < ndens.size(); i++) {
-        if (i < ndens.size() - 1) {
+    for (size_t i = 0; i < p.size(); i++) {
+        if (i < p.size() - 1) {
             gsl_integration_workspace* w1;
             w1 = gsl_integration_workspace_alloc(100);
             gsl_integration_qag(&F1, gamma[i], gamma[i + 1], 1e1, 1e1, 100, 1, w1, &integral,
@@ -137,8 +141,8 @@ void Kappa::cooling_steadystate(double ucom, double n0, double bfield, double r,
                 (integral / tinj) / (pdot_ad * p[i] / (mass_gr * constants::cee) +
                                      pdot_rad * (gamma[i] * p[i] / (mass_gr * constants::cee)));
         } else {
-            ndens[ndens.size() - 1] =
-                ndens[ndens.size() - 2] * std::pow(p[p.size() - 1] / p[p.size() - 2], -kappa);
+            ndens[p.size() - 1] =
+                ndens[p.size() - 2] * std::pow(p[p.size() - 1] / p[p.size() - 2], -pspec2 - 1);
         }
     }
     // the last bin is set by arbitrarily assuming cooled distribution; this is
@@ -157,12 +161,14 @@ void Kappa::cooling_steadystate(double ucom, double n0, double bfield, double r,
     }
 
     initialize_gdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! Method to calculate maximum momentum of non thermal particles based on
-//! acceleration and cooling timescales
-double Kappa::max_p(double ucom, double bfield, double betaeff, double r, double fsc) {
+//! acceleration and cooling timescales The estimate is identical to the old
+//! agnjet but in momentum space; see Lucchini et al. 2019 for the math of the
+//! old version
+double Bknpower::max_p(double ucom, double bfield, double betaeff, double r, double fsc) {
     double Urad, escom, accon, syncon, b, c, gmax;
     Urad = std::pow(bfield, 2.) / (8. * constants::pi) + ucom;
     escom = betaeff * constants::cee / r;
@@ -177,13 +183,15 @@ double Kappa::max_p(double ucom, double bfield, double betaeff, double r, double
     return std::pow(std::pow(gmax, 2.) - 1., 1. / 2.) * mass_gr * constants::cee;
 }
 
-void Kappa::test() {
-    std::cout << "Kappa distribution;" << std::endl;
-    std::cout << "kappa index: " << kappa << std::endl;
-    std::cout << "dimensionless temperature: " << theta << std::endl;
+//! simple method to check quantities.
+void Bknpower::test() {
+    std::cout << "Broken power-law distribution;" << std::endl;
+    std::cout << "pspec1: " << pspec1 << std::endl;
+    std::cout << "pspec2: " << pspec2 << std::endl;
+    std::cout << "pbreak: " << pbrk << std::endl;
     std::cout << "Array size: " << p.size() << std::endl;
-    std::cout << "Default normalization: " << knorm << std::endl;
-    std::cout << "Particle mass in grams: " << mass_gr << std::endl;
+    std::cout << "Default normalization: " << norm << std::endl;
+    std::cout << "Particle mass: " << mass_gr << std::endl;
 }
 
 }    // namespace kariba

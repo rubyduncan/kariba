@@ -14,20 +14,20 @@ class BBody : public Radiation {
   public:
     BBody(size_t size = 40);
 
-    virtual void set_temp_kev(double T);
-    virtual void set_temp_k(double T);
-    virtual void set_temp_hz(double nu);
-    virtual void set_lum(double L);
-    virtual void bb_spectrum();
+    void set_temp_kev(double T);
+    void set_temp_k(double T);
+    void set_temp_hz(double nu);
+    void set_lum(double L);
+    void bb_spectrum();
 
-    virtual double temp_kev() const;
-    virtual double temp_k() const;
-    virtual double temp_hz() const;
-    virtual double lum() const;
-    virtual double norm() const;
-    virtual double Urad(double d) const;
+    double temp_kev() const;
+    double temp_k() const;
+    double temp_hz() const;
+    double lum() const;
+    double norm() const;
+    double Urad(double d) const;
 
-    virtual void test();
+    void test();
 };
 
 }    // namespace kariba

@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <gsl/gsl_spline.h>
-#include <gsl/gsl_integration.h>
 
 namespace kariba {
 
@@ -37,7 +36,6 @@ struct ComintParams {
     gsl_interp_accel* acc_eldis;
     gsl_spline* phodis;
     gsl_interp_accel* acc_phodis;
-    gsl_integration_workspace* w2;
 };
 
 //! Structure used for GSL integration
@@ -86,26 +84,26 @@ class Radiation {
   public:
     Radiation(size_t size);
 
-    virtual const std::vector<double>& get_energy() const { return en_phot; }
+    const std::vector<double>& get_energy() const { return en_phot; }
 
-    virtual const std::vector<double>& get_nphot() const { return num_phot; }
+    const std::vector<double>& get_nphot() const { return num_phot; }
 
-    virtual const std::vector<double>& get_energy_obs() const { return en_phot_obs; }
+    const std::vector<double>& get_energy_obs() const { return en_phot_obs; }
 
-    virtual const std::vector<double>& get_nphot_obs() const { return num_phot_obs; }
+    const std::vector<double>& get_nphot_obs() const { return num_phot_obs; }
 
-    virtual size_t get_size() const { return en_phot.size(); }
+    size_t get_size() const { return en_phot.size(); }
 
-    virtual double get_volume() const { return vol; }
+    double get_volume() const { return vol; }
 
-    virtual double integrated_luminosity(double numin, double numax);
+    double integrated_luminosity(double numin, double numax);
 
-    virtual void set_beaming(double theta, double speed, double doppler);
-    virtual void set_inclination(double theta);
-    virtual void set_geometry(const std::string& geom, double l1, double l2);
-    virtual void set_geometry(const std::string& geom, double l1);
+    void set_beaming(double theta, double speed, double doppler);
+    void set_inclination(double theta);
+    void set_geometry(const std::string& geom, double l1, double l2);
+    void set_geometry(const std::string& geom, double l1);
 
-    virtual void set_counterjet(bool flag);
-    virtual void test_arrays();
+    void set_counterjet(bool flag);
+    void test_arrays();
 };
 }    // namespace kariba

@@ -18,29 +18,28 @@ class ShSDisk : public Radiation {
   public:
     ShSDisk(size_t size = 50);
 
-    virtual double hdisk() const { return Hratio; };
+    double hdisk() const { return Hratio; };
 
-    virtual double tin() const { return Tin; };
+    double tin() const { return Tin; };
 
-    virtual double rin() const { return r; };
+    double rin() const { return r; };
 
-    virtual double lum() const { return Ldisk; };
+    double lum() const { return Ldisk; };
 
-    virtual void disk_spectrum();
-    virtual void cover_disk(double f);
-
-    virtual double total_luminosity();
-
-    virtual void set_mbh(double M);
-    virtual void set_rin(double R);
-    virtual void set_rout(double R);
-    virtual void set_luminosity(double L);
-    virtual void set_tin_k(double T);
-    virtual void set_tin_kev(double T);
-
-    virtual void test();
-
+    void disk_spectrum();
+    void cover_disk(double f);
     friend double disk_int(double nu, void* p);
+
+    double total_luminosity();
+
+    void set_mbh(double M);
+    void set_rin(double R);
+    void set_rout(double R);
+    void set_luminosity(double L);
+    void set_tin_k(double T);
+    void set_tin_kev(double T);
+
+    void test();
 };
 
 }    // namespace kariba

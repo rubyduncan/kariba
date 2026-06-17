@@ -43,7 +43,7 @@ void Thermal::set_ndens() {
         ndens[i] = thnorm * std::pow(p[i], 2.) * std::exp(-gamma[i] / theta);
     }
     initialize_gdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! methods to set the temperature and normalization. NOTE: temperature must be

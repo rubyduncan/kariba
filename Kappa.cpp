@@ -65,7 +65,7 @@ void Kappa::set_ndens() {
                    std::pow(1. + (gamma[i] - 1.) / (kappa * theta), -kappa - 1.);
     }
     initialize_pdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! Methods to calculate the normalization of the function
@@ -157,7 +157,7 @@ void Kappa::cooling_steadystate(double ucom, double n0, double bfield, double r,
     }
 
     initialize_gdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! Method to calculate maximum momentum of non thermal particles based on

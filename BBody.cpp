@@ -7,30 +7,13 @@
 namespace kariba {
 
 BBody::BBody(size_t size) : Radiation(size) {}    // default of size = 40 in definition
-
 //! Methods to set BB quantities
-void BBody::set_temp_kev(double T) {
-    double emin, emax, einc;
-
-    Tbb = T * constants::kboltz_kev2erg / constants::kboltz;
-
-    emin = 0.02 * constants::kboltz * Tbb;
-    emax = 30. * constants::kboltz * Tbb;
-
-    einc = (std::log10(emax) - std::log10(emin)) / static_cast<double>(en_phot.size() - 1);
-
-    for (size_t i = 0; i < en_phot.size(); i++) {
-        en_phot[i] = std::pow(10., std::log10(emin) + static_cast<double>(i) * einc);
-        en_phot_obs[i] = en_phot[i];
-    }
-}
-
 void BBody::set_temp_k(double T) {
     double emin, emax, einc;
 
     Tbb = T;
 
-    emin = 0.02 * constants::kboltz * Tbb;
+    emin = 1e-3 * constants::kboltz * Tbb;
     emax = 30. * constants::kboltz * Tbb;
 
     einc = (std::log10(emax) - std::log10(emin)) / static_cast<double>(en_phot.size() - 1);
@@ -39,23 +22,16 @@ void BBody::set_temp_k(double T) {
         en_phot[i] = std::pow(10., std::log10(emin) + static_cast<double>(i) * einc);
         en_phot_obs[i] = en_phot[i];
     }
+}
+
+void BBody::set_temp_kev(double T) {
+    set_temp_k(T * constants::kboltz_kev2erg / constants::kboltz);
 }
 
 void BBody::set_temp_hz(double nu) {
-    double emin, emax, einc;
-
-    Tbb = (constants::herg * nu) / (2.82 * constants::kboltz);
-
-    emin = 0.02 * constants::kboltz * Tbb;
-    emax = 30. * constants::kboltz * Tbb;
-
-    einc = (std::log10(emax) - std::log10(emin)) / static_cast<double>(en_phot.size() - 1);
-
-    for (size_t i = 0; i < en_phot.size(); i++) {
-        en_phot[i] = std::pow(10., std::log10(emin) + static_cast<double>(i) * einc);
-        en_phot_obs[i] = en_phot[i];
-    }
+    set_temp_k((constants::herg * nu) / (2.82 * constants::kboltz));
 }
+
 
 void BBody::set_lum(double L) {
     Lbb = L;

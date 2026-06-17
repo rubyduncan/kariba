@@ -15,21 +15,20 @@ class Kappa : public Particles {
   public:
     Kappa(size_t size);
 
-    virtual void set_p(double ucom, double bfield, double betaeff, double r, double fsc);
-    virtual void set_p(double max);
-    virtual void set_ndens();
-    virtual void set_kappa(double k);
-    virtual void set_temp_kev(double T);
-    virtual void set_norm(double n);
-
-    virtual void cooling_steadystate(double ucom, double n0, double bfield, double r,
-                                     double gshift);
-    virtual double max_p(double ucom, double bfield, double betaeff, double r, double fsc);
-
-    virtual void test();
+    void set_p(double ucom, double bfield, double betaeff, double r, double fsc);
+    void set_p(double max);
+    void set_ndens();
+    void set_kappa(double k);
+    void set_temp_kev(double T);
+    void set_norm(double n);
 
     friend double norm_kappa_int(double x, void* p);
     friend double injection_kappa_int(double x, void* p);
+
+    void cooling_steadystate(double ucom, double n0, double bfield, double r, double gshift);
+    double max_p(double ucom, double bfield, double betaeff, double r, double fsc);
+
+    void test();
 };
 
 }    // namespace kariba

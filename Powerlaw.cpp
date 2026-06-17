@@ -53,7 +53,7 @@ void Powerlaw::set_ndens() {
         ndens[i] = plnorm * std::pow(p[i], -pspec) * std::exp(-p[i] / pmax);
     }
     initialize_gdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! methods to set the slope and normalization
@@ -126,7 +126,7 @@ void Powerlaw::cooling_steadystate(double ucom, double n0, double bfield, double
     }
 
     initialize_gdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! Method to calculate maximum momentum of non thermal particles based on

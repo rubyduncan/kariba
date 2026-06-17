@@ -1,44 +1,69 @@
-CONFIG = make.config
+CONFIG = ../make.config
 include $(CONFIG)
 
 
-.PHONY: all lib examples tests install docs clean distclean
+ifndef GSL
+	GSL_CPPFLAGS=
+	GSL_LDFLAGS=
+else
+	GSL_CPPFLAGS=-I$(GSL)/include
+	GSL_LDFLAGS=-L$(GSL)/lib
+endif
 
 
-all: lib tests examples
+# Detect OS: Darwin or Linux
+UNAME := $(shell uname -s)
 
-lib:
-	$(MAKE) -C src
+CXXFLAGS += $(OPENMP)
+CPPFLAGS += $(GSL_CPPFLAGS)
+LD = $(CXX)
+LDFLAGS += $(OPENMP) $(GSL_LDFLAGS) $(EXTRA_LDFLAGS)
+LDLIBS += -lgsl -lgslcblas -lm
+AR = ar
+AR_OPTS = rcs
+RM = rm -f
 
-examples: lib
-	$(MAKE) -C examples
 
-tests: lib
-	$(MAKE) -C tests
 
-install: lib
-	$(MAKE) -C src install
+SOURCES = BBody.cpp Bknpower.cpp Compton.cpp Cyclosyn.cpp EBL.cpp Electrons.cpp GammaRays.cpp Kappa.cpp Mixed.cpp Neutrinos_pg.cpp Neutrinos_pp.cpp Particles.cpp Powerlaw.cpp Radiation.cpp ShSDisk.cpp Thermal.cpp
+OBJECTS = $(subst .cpp,.o,$(SOURCES))
+LIBSTATIC = libkariba.a
 
-docs:
-	$(MAKE) -C docs
+# Platform specific stuff for building the shared library
+ifeq ($(UNAME), Darwin)  # macOS
+    DYN_EXT = dylib
+    DYLIB_INSTALL_NAME = @rpath/libkariba.dylib
+else ifeq ($(UNAME), Linux)
+    DYN_EXT = so
+endif
+LIBSHARED = libkariba.$(DYN_EXT)
 
+
+
+.PHONY: all clean distclean
+
+
+all: shared static
+
+# macOS compatible way to create a static library
+static: $(OBJECTS)
+	$(AR) $(AR_OPTS) $(LIBSTATIC) $(OBJECTS)
+
+shared: $(OBJECTS)
+ifeq ($(UNAME), Darwin)
+	$(LD) -dynamiclib -o $(LIBSHARED) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -install_name $(DYLIB_INSTALL_NAME)
+else ifeq ($(UNAME), Linux)
+	$(LD) -shared -fPIC -o $(LIBSHARED) $(LDFLAGS) $(OBJECTS) $(LDLIBS) -Wl,-soname,$(LIBSHARED)
+endif
+
+install: shared
+	install -d $(DESTDIR)$(PREFIX)/lib/
+	install -m 644 $(LIBSHARED) $(DESTDIR)$(PREFIX)/lib/
+	install -d $(DESTDIR)$(PREFIX)/include/kariba/
+	install -m 644 kariba/*.hpp $(DESTDIR)$(PREFIX)/include/kariba/
 
 clean:
-	$(MAKE) -C src clean
-	$(MAKE) -C examples clean
-	$(MAKE) -C tests clean
+	$(RM) $(OBJECTS)
 
-distclean:
-	$(MAKE) -C src distclean
-	$(MAKE) -C examples distclean
-	$(MAKE) -C tests distclean
-
-help:
-	@echo Possible targets
-	@echo
-	@echo "'make lib': build the library"
-	@echo "'make examples': build the examples"
-	@echo "'make all': build all of the three above. This is the default for just running 'make'"
-	@echo
-	@echo "'make clean': remove the intermediate (object) files for each target"
-	@echo "'make distclean': remove the intermediate and final files for each target"
+distclean: clean
+	$(RM) $(LIBSHARED) $(LIBSTATIC)

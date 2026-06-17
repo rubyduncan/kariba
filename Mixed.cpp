@@ -15,7 +15,6 @@ namespace kariba {
 Mixed::Mixed(size_t size) : Particles(size) {
     thnorm = 1.;
     plnorm = 1.;
-    // s used to be the size of the particle momentum grid that was used before
 
     mass_gr = constants::emgm;
     mass_kev = constants::emgm * constants::gr_to_kev;
@@ -24,8 +23,7 @@ Mixed::Mixed(size_t size) : Particles(size) {
 //! Methods to set momentum/energy arrays and number density arrays
 void Mixed::set_p(double ucom, double bfield, double betaeff, double r, double fsc) {
     pmin_pl = av_th_p();
-    pcut_pl = std::max(max_p(ucom, bfield, betaeff, r, fsc), pmax_th);
-    pmax_pl = 10*pcut_pl; 
+    pmax_pl = std::max(max_p(ucom, bfield, betaeff, r, fsc), pmax_th);
 
     double pinc = (std::log10(pmax_pl) - std::log10(pmin_th)) / static_cast<double>(p.size() - 1);
 
@@ -38,8 +36,7 @@ void Mixed::set_p(double ucom, double bfield, double betaeff, double r, double f
 //! Same as above, but assuming a fixed maximum Lorentz factor
 void Mixed::set_p(double gmax) {
     pmin_pl = av_th_p();
-    pcut_pl = std::pow(std::pow(gmax, 2.) - 1., 1. / 2.) * mass_gr * constants::cee;
-    pmax_pl = 10*pcut_pl; 
+    pmax_pl = std::pow(std::pow(gmax, 2.) - 1., 1. / 2.) * mass_gr * constants::cee;
 
     double pinc = (std::log10(pmax_pl) - std::log10(pmin_th)) / static_cast<double>(p.size() - 1);
 
@@ -49,25 +46,19 @@ void Mixed::set_p(double gmax) {
     }
 }
 
-void Mixed::set_ndens(){
-    //need to loop over the particle momentum grid, I think that will work with p.size()
-    for (int i=0;i<p.size();i++){
-        if (p[i] <= pmin_pl){
-            ndens[i] = thnorm*pow(p[i],2.)*exp(-gamma[i]/theta);
-        } else { //calculate pl and the cutoff prescription first, then use in either case: 
-            //if type exists, then use type, otherwise create type and set = 0
-            const double x = p[i] / pcut_pl;
-            const double C = Particles::cutoff_factor(x, cutoff_type);
-            const double pl = plnorm*pow(p[i], -pspec) * C;
-            if (p[i] < pmax_th) {
-                ndens[i] = thnorm*pow(p[i],2.)*exp(-gamma[i]/theta) + pl; 
-            } else {
-                ndens[i] = pl; 
-            }
+void Mixed::set_ndens() {
+    for (size_t i = 0; i < p.size(); i++) {
+        if (p[i] <= pmin_pl) {
+            ndens[i] = thnorm * std::pow(p[i], 2.) * std::exp(-gamma[i] / theta);
+        } else if (p[i] < pmax_th) {
+            ndens[i] = thnorm * std::pow(p[i], 2.) * std::exp(-gamma[i] / theta) +
+                       plnorm * std::pow(p[i], -pspec) * std::exp(-p[i] / pmax_pl);
+        } else {
+            ndens[i] = plnorm * std::pow(p[i], -pspec) * std::exp(-p[i] / pmax_pl);
         }
     }
     initialize_gdens();
-    gdens_differentiate();	
+    differentiate();
 }
 
 //! methods to set the temperature, pl fraction, and normalizations. Temperature
@@ -75,7 +66,7 @@ void Mixed::set_ndens(){
 void Mixed::set_temp_kev(double T) {
     Temp = T;
     theta = T * constants::kboltz_kev2erg / (mass_gr * constants::cee * constants::cee);
-    double emin_th = (1. / 100.) * T;
+    double emin_th = 1e-4 * T;
     double emax_th = 20. * T;
     double gmin_th, gmax_th;
 
@@ -90,27 +81,22 @@ void Mixed::set_pspec(double s1) { pspec = s1; }
 void Mixed::set_plfrac(double f) { plfrac = f; }
 
 void Mixed::set_plfrac(double Le, double r, double eldens) {
-    double gpmax = sqrt(pmax_pl * pmax_pl / (mass_gr * constants::cee * mass_gr * constants::cee) + 1.);
+    double gpmax =
+        sqrt(pmax_pl * pmax_pl / (mass_gr * constants::cee * mass_gr * constants::cee) + 1.);
+    double gpmin =
+        sqrt(pmin_pl * pmin_pl / (mass_gr * constants::cee * mass_gr * constants::cee) + 1.);
     double sum = 0;
     double dx = std::log10(gamma[2] / gamma[1]);
-
-    for (size_t i = 0; i < gamma.size(); i++) {
-        const double p_i = p[i];
-        const double x = p_i / pcut_pl;
-        const double cutoff_frac = Particles::cutoff_factor(x, cutoff_type);
-        sum += std::log(10.) *std::pow(gamma[i], -pspec + 2.) * cutoff_frac * dx;
+    for (size_t i = 0; i < p.size(); i++) {
+        sum += std::log(10.) * std::pow(gamma[i], -pspec + 2.) * std::exp(-gamma[i] / gpmax) * dx;
     }
     double Ue = Le / (constants::pi * r * r * constants::cee);
     double K = std::max(Ue / (sum * mass_gr * constants::cee * constants::cee), 0.);
 
     sum = 0.;
     for (size_t i = 0; i < gamma.size(); i++) {
-        const double p_i = p[i];
-        const double x = p_i / pcut_pl;
-        const double cutoff_frac = Particles::cutoff_factor(x, cutoff_type);
-        sum += std::log(10.) * std::pow(gamma[i], -pspec + 1.) * cutoff_frac * dx;
+        sum += std::log(10.) * std::pow(gamma[i], -pspec + 1.) * std::exp(-gamma[i] / gpmax) * dx;
     }
-
     double n_nth = K * sum;
     plfrac = n_nth / eldens;
 }
@@ -119,33 +105,6 @@ void Mixed::set_norm(double n) {
     thnorm = (1. - plfrac) * n / (std::pow(mass_gr * constants::cee, 3.) * theta * K2(1. / theta));
     plnorm = plfrac * n * (1. - pspec) /
              (std::pow(pmax_pl, (1. - pspec)) - std::pow(pmin_pl, (1. - pspec)));
-}
-
-//! Injection function to be integrated in cooling
-double injection_mixed_int(double x, void* pars) {
-    InjectionMixedParams* params = static_cast<InjectionMixedParams*>(pars);
-    double s = params->s;
-    double t = params->t;
-    double nth = params->nth;
-    double npl = params->npl;
-    double m = params->m;
-    double min = params->min;
-    double max = params->max;
-    double cutoff = params->cutoff;
-    const int cutoff_type = params->cutoff_type;
-
-    double mom_int = std::pow(std::pow(x, 2.) - 1., 1. / 2.) * m * constants::cee;
-    const double cutoff_frac = mom_int / cutoff;
-    const double cutoff_shape = Particles::cutoff_factor(cutoff_frac, cutoff_type);
-
-    if (x <= min) {
-        return nth * std::pow(mom_int, 2.) * std::exp(-x / t);
-    } else if (x < max) {
-        return nth * std::pow(mom_int, 2.) * std::exp(-x / t) +
-               npl * std::pow(mom_int, -s) * cutoff_shape;
-    } else {
-        return npl * std::pow(mom_int, -s) * cutoff_shape;
-    }
 }
 
 //! Method to solve steady state continuity equation. NOTE: KN cross section not
@@ -164,7 +123,7 @@ void Mixed::cooling_steadystate(double ucom, double n0, double bfield, double r,
     double integral, error;
     gsl_function F1;
     auto params =
-        InjectionMixedParams{pspec, theta, thnorm, plnorm, mass_gr, gam_min, gam_max, pcut_pl, cutoff_type};
+        InjectionMixedParams{pspec, theta, thnorm, plnorm, mass_gr, gam_min, gam_max, pmax_pl};
     F1.function = &injection_mixed_int;
     F1.params = &params;
 
@@ -199,7 +158,7 @@ void Mixed::cooling_steadystate(double ucom, double n0, double bfield, double r,
         ndens[i] = ndens[i] / renorm;
     }
     initialize_gdens();
-    gdens_differentiate();
+    differentiate();
 }
 
 //! Method to calculate maximum momentum of non thermal particles based on
@@ -351,6 +310,33 @@ void Mixed::test() {
     std::cout << "Number density: " << count_particles() << std::endl;
     std::cout << "Thermal monetum limits: " << pmin_th << " " << pmax_th << std::endl;
     std::cout << "Non-thermal momentum limits: " << pmin_pl << " " << pmax_pl << std::endl;
+    std::cout << "Thermal norm: " << thnorm << std::endl;
+    std::cout << "Non-thermal norm: " << plnorm << std::endl;
+}
+
+//! Injection function to be integrated in cooling
+double injection_mixed_int(double x, void* pars) {
+    InjectionMixedParams* params = static_cast<InjectionMixedParams*>(pars);
+    double s_index = params->s;
+    double theta_temp = params->t;
+    double nth = params->nth;
+    double npl = params->npl;
+    double mass = params->m;
+    double gamma_min = params->min;
+    double gamma_max = params->max;
+    double cutoff = params->cutoff;
+
+    double mom_int = std::pow(std::pow(x, 2.) - 1., 1. / 2.) * mass * constants::cee;
+    // double mom_cuton = std::pow(std::pow(gamma_max, 2.) - 1., 1. / 2.) * mass * constants::cee;
+
+    if (x <= gamma_min) {
+        return nth * std::pow(mom_int, 2.) * std::exp(-x / theta_temp);
+    } else if (x < gamma_max) {
+        return nth * std::pow(mom_int, 2.) * std::exp(-x / theta_temp) +
+               npl * std::pow(mom_int, -s_index) * std::exp(-mom_int / cutoff);
+    } else {
+        return npl * std::pow(mom_int, -s_index) * std::exp(-mom_int / cutoff);
+    }
 }
 
 }    // namespace kariba
