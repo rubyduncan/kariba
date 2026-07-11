@@ -26,7 +26,7 @@ class Mixed : public Particles {
   protected:
     double thnorm, theta, Temp;
     double pspec, plnorm;
-    double pmin_th, pmax_th, pmin_pl, pmax_pl;
+    double pmin_th, pmax_th, pmin_pl, pcut_pl, pmax_pl;
     double plfrac;
 
   public:
